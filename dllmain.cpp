@@ -1,31 +1,29 @@
 #include <iostream>
 #include <Windows.h>
 #include <winternl.h>
+#include "Console.h"
+
+Console console;
+
+/*--------------------------------------------------
+		User32.dll MessageBox hook
+----------------------------------------------------*/
+LPCSTR module_name = "user32.dll";
+LPCSTR function_name = "MessageBoxW";
 
 typedef int(WINAPI* TrueMessageBox)(HWND, LPCWSTR, LPCWSTR, UINT);
 
-// remember memory address of the original MessageBoxW routine
 TrueMessageBox trueMessageBox = MessageBoxW;
 
-BOOL WINAPI hookedMessageBox(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)
+BOOL WINAPI MessageBoxHook(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)
 {
-	//LPCTSTR lpTextChanged = L"This messagebox is also changed";
 	LPCTSTR lpCaptionChanged = L"Hooked MessageBox";
 	return trueMessageBox(hWnd, lpText, lpCaptionChanged, uType);
 }
 
-#include <fstream>
 DWORD WINAPI installIATHook(PVOID base) {
-//void installIATHook(){
-
-	std::ofstream MyFile("C://Users//%USERNAME%//Desktop//logging.txt");
 	
 	LPVOID imageBase = GetModuleHandle(NULL);
-	if (imageBase == NULL) {
-		MyFile << "module handle doesnt exist" << std::endl;
-		MyFile.close();
-		return FALSE;
-	}
 
 	PIMAGE_DOS_HEADER dosHeaders = (PIMAGE_DOS_HEADER)imageBase;
 	PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)imageBase + dosHeaders->e_lfanew);
@@ -34,8 +32,6 @@ DWORD WINAPI installIATHook(PVOID base) {
 
 	if (importsDirectory.Size == 0) //if size of the table is 0 => Import Table does not exist
 	{
-		MyFile << "Import table doesnt exist" << std::endl;
-		MyFile.close();
 		return FALSE;
 	}
 
@@ -43,7 +39,6 @@ DWORD WINAPI installIATHook(PVOID base) {
 
 	while (importDescriptor->Name != NULL) {
 		LPCSTR libraryName = (LPCSTR)importDescriptor->Name + (DWORD_PTR)imageBase;
-		MyFile << libraryName << std::endl;
 
 		HMODULE library = LoadLibraryA(libraryName);
 
@@ -60,7 +55,6 @@ DWORD WINAPI installIATHook(PVOID base) {
 				}
 				else {
 					PIMAGE_IMPORT_BY_NAME functionName = (PIMAGE_IMPORT_BY_NAME)((DWORD_PTR)imageBase + originalFirstThunk->u1.AddressOfData);
-					MyFile << functionName->Name << std::endl;
 
 					// find MessageBoxW address
 					if (std::string(functionName->Name).compare("MessageBoxW") == 0) {
@@ -69,7 +63,7 @@ DWORD WINAPI installIATHook(PVOID base) {
 						VirtualProtect((LPVOID)(&firstThunk->u1.Function), 8, PAGE_READWRITE, &oldProtect);
 
 						// swap MessageBoxW address with address of hookedMessageBox
-						firstThunk->u1.Function = (DWORD_PTR)hookedMessageBox;
+						firstThunk->u1.Function = (DWORD_PTR)MessageBoxHook;
 						MyFile << "installed hook" << std::endl;
 
 						// don't free library or hook will not be part of program anymore
@@ -84,8 +78,6 @@ DWORD WINAPI installIATHook(PVOID base) {
 		importDescriptor++;
 		
 	}
-	// Close the file
-	MyFile.close();
 
 	// don't free library or hook will not be part of program anymore
 	//FreeLibraryAndExitThread(static_cast<HMODULE>(base), 1);
@@ -95,8 +87,15 @@ BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpRese
 {
     switch (ul_reason_for_call)
     {
-    case DLL_PROCESS_ATTACH:
-		CreateThread(nullptr, NULL, installIATHook, hModule, NULL, nullptr); break;
+	case DLL_PROCESS_ATTACH: {
+		if (!console.open()) {
+			// Indicate DLL loading failed
+			return FALSE;
+		}
+		CreateThread(nullptr, NULL, installIATHook, hModule, NULL, nullptr);
+		return TRUE;
+	}
+		
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
