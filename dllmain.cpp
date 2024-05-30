@@ -11,7 +11,7 @@ Console console;
 LPCSTR module_name = "user32.dll";
 LPCSTR function_name = "MessageBoxW";
 
-typedef int(WINAPI* TrueMessageBox)(HWND, LPCWSTR, LPCWSTR, UINT);
+typedef int(WINAPI *TrueMessageBox)(HWND, LPCWSTR, LPCWSTR, UINT);
 
 TrueMessageBox trueMessageBox = MessageBoxW;
 
@@ -37,23 +37,22 @@ PIMAGE_IMPORT_DESCRIPTOR get_import_directory(UINT_PTR base)
 PIMAGE_IMPORT_DESCRIPTOR search_import_directory(UINT_PTR base, PIMAGE_IMPORT_DESCRIPTOR import_descriptor, LPCSTR module_name)
 {
 	// Search the import descriptors for the correct module
-	while (import_descriptor->Characteristics != NULL) {
+	while (import_descriptor->Characteristics != NULL)
+	{
 		// Name is a RVA to an ASCII string
 		LPCSTR current_name = reinterpret_cast<LPCSTR>(base + import_descriptor->Name);
 
-		if (_stricmp(module_name, current_name) == 0) {
+		if (_stricmp(module_name, current_name) == 0)
+		{
 			fprintf(console.stream, "Found %s in Import Directory Table\n", module_name);
 			return import_descriptor;
 		}
 
 		import_descriptor++;
-
 	}
 	fprintf(console.stream, "Unable to find %s in Import Directory Table\n", module_name);
 	return NULL;
 }
-
-
 
 // The ILT and IAT tables contains one entry for each function imported from the module and ends with a NULL entry
 // We iterate the entries in the ILT and check the names in the Hint/Name table until we find the correct one
@@ -66,15 +65,18 @@ PIMAGE_THUNK_DATA search_IAT(UINT_PTR base, PIMAGE_THUNK_DATA first_thunk, PIMAG
 	while (original_thunk->u1.AddressOfData != NULL)
 	{
 		// To know that a function is imported by name instead of ordinal, you must check that the highest bit is NOT set in the DWORD (i.e. 0x80000000).
-		if (original_thunk->u1.AddressOfData & IMAGE_ORDINAL_FLAG) {
+		if (original_thunk->u1.AddressOfData & IMAGE_ORDINAL_FLAG)
+		{
 			// Import by ordinal
 		}
-		else {
+		else
+		{
 			// Check the Hint/Name table for the name of the function
 			PIMAGE_IMPORT_BY_NAME hint_name = reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(base + original_thunk->u1.AddressOfData);
 			fprintf(console.stream, "Current function name: %s \n", hint_name->Name);
 
-			if (std::string(hint_name->Name).compare(function_name) == 0) {
+			if (std::string(hint_name->Name).compare(function_name) == 0)
+			{
 				fprintf(console.stream, "Found %s in Import Address Table\n", function_name);
 				return thunk;
 			}
@@ -87,7 +89,8 @@ PIMAGE_THUNK_DATA search_IAT(UINT_PTR base, PIMAGE_THUNK_DATA first_thunk, PIMAG
 }
 
 // Install the hook (overwrite the pointer in the Import Address Table)
-void overwriteIAT(PIMAGE_THUNK_DATA thunk, UINT_PTR address) {
+void overwriteIAT(PIMAGE_THUNK_DATA thunk, UINT_PTR address)
+{
 	// Change the protection so we can overwrite the pointer, store the old protection
 	// Import table contains DWORD in 32-bit and ULONGLONG in 64-bit!
 	DWORD old_protection{};
@@ -102,15 +105,17 @@ void overwriteIAT(PIMAGE_THUNK_DATA thunk, UINT_PTR address) {
 
 // Storing these values to be able to use them in the attach and detach
 HMODULE h_module = NULL;
-UINT_PTR base = 0; // Using UINT_PTR because it scales to the size of a pointer for both 32-bit and 64-bit Windows 
+UINT_PTR base = 0;			 // Using UINT_PTR because it scales to the size of a pointer for both 32-bit and 64-bit Windows
 PIMAGE_THUNK_DATA thunk = 0; // Store this to use it for attach and detach
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
 	switch (ul_reason_for_call)
 	{
-	case DLL_PROCESS_ATTACH: {
-		if (!console.open()) {
+	case DLL_PROCESS_ATTACH:
+	{
+		if (!console.open())
+		{
 			// Indicate DLL loading failed
 			return FALSE;
 		}
@@ -126,7 +131,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		// Search the import descriptors for the correct module
 		PIMAGE_IMPORT_DESCRIPTOR first_import_descriptor = get_import_directory(base);
 		PIMAGE_IMPORT_DESCRIPTOR import_descriptor = search_import_directory(base, first_import_descriptor, module_name);
-		if (import_descriptor == NULL) {
+		if (import_descriptor == NULL)
+		{
 			return FALSE;
 		}
 
@@ -138,7 +144,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		PIMAGE_THUNK_DATA first_thunk = reinterpret_cast<PIMAGE_THUNK_DATA>(base + import_descriptor->FirstThunk);
 		PIMAGE_THUNK_DATA original_first_thunk = reinterpret_cast<PIMAGE_THUNK_DATA>(base + import_descriptor->OriginalFirstThunk);
 		thunk = search_IAT(base, first_thunk, original_first_thunk, function_name);
-		if (thunk == NULL) {
+		if (thunk == NULL)
+		{
 			return FALSE;
 		}
 
@@ -154,10 +161,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		return TRUE;
 	}
 
-	case DLL_THREAD_ATTACH: break;
-	case DLL_THREAD_DETACH: break;
-	case DLL_PROCESS_DETACH: {
-		if (thunk != NULL) {
+	case DLL_THREAD_ATTACH:
+		break;
+	case DLL_THREAD_DETACH:
+		break;
+	case DLL_PROCESS_DETACH:
+	{
+		if (thunk != NULL)
+		{
 			fprintf(console.stream, "Uninstalling hook ...\n");
 			overwriteIAT(thunk, (UINT_PTR)trueMessageBox);
 			fprintf(console.stream, "Thunk address: %p\n", thunk->u1.Function);
@@ -169,4 +180,3 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 	}
 	return TRUE;
 }
-
